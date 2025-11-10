@@ -37,13 +37,25 @@
         // 1. CONSTANTS & ICONS
         // =================================================================
         const INITIAL_HP = 3;
-        const ALL_ITEMS = [
+        const INITIAL_HP_ENDLESS = 4;
+        const INITIAL_CHARGES_ENDLESS = 2;
+
+        const CLASSIC_ITEMS = [
             { type: 'magnifyingGlass', name: 'Magnifying Glass', description: 'Reveal the next shell.' },
             { type: 'handSaw', name: 'Hand Saw', description: 'Next live shell deals 2 damage.' },
             { type: 'beer', name: 'Beer', description: 'Eject the current shell.' },
             { type: 'handcuffs', name: 'Handcuffs', description: 'The dealer skips their next turn.' },
             { type: 'cigarettes', name: 'Cigarettes', description: 'Restore 1 HP.' },
         ];
+
+        const ENDLESS_ITEMS = [
+            ...CLASSIC_ITEMS,
+            { type: 'inverter', name: 'Inverter', description: 'Flips the polarity of the current shell.' },
+            { type: 'adrenaline', name: 'Adrenaline', description: 'Steal a random item from the dealer and use it instantly.' },
+            { type: 'expiredMedicine', name: 'Expired Medicine', description: '40% chance to heal 2 HP, 60% chance to lose 1 HP.' },
+        ];
+
+        let ALL_ITEMS = CLASSIC_ITEMS;
 
         const HeartIcon = (className = '') => `
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="${className}">
@@ -53,6 +65,11 @@
         const SkullIcon = (className = '') => `
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="${className}">
                  <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-2-9c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1zm4 0c-.55 0-1 .45-1 1s.45 1 1 1 1-.45 1-1-.45-1-1-1zm-2 5c-1.66 0-3-1.34-3-3h6c0 1.66-1.34 3-3 3z"/>
+            </svg>`;
+
+        const LightningIcon = (className = '') => `
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="${className}">
+                <path d="M7 2v11h3v9l7-12h-4l4-8z"/>
             </svg>`;
 
         const ShellIcon = ({ type, isFired = false }) => {
@@ -72,10 +89,13 @@
         let state = {};
         
         function resetState() {
+             const newMode = state.gameMode || 'live';
              state = {
                 round: 1,
                 playerHP: INITIAL_HP,
                 dealerHP: INITIAL_HP,
+                playerCharges: 0,
+                dealerCharges: 0,
                 shells: [],
                 currentShellIndex: 0,
                 playerInventory: [],
@@ -89,9 +109,19 @@
                 initialShellCounts: { live: 0, blank: 0 },
                 dealerActionMessage: null,
                 itemToConfirm: null,
-                gameMode: 'live',
+                gameMode: newMode,
                 lastActionMessage: { message: 'Game starting...', type: 'game' },
             };
+
+            if (state.gameMode === 'endless') {
+                state.playerHP = INITIAL_HP_ENDLESS;
+                state.dealerHP = INITIAL_HP_ENDLESS;
+                state.playerCharges = INITIAL_CHARGES_ENDLESS;
+                state.dealerCharges = INITIAL_CHARGES_ENDLESS;
+                ALL_ITEMS = ENDLESS_ITEMS;
+            } else {
+                ALL_ITEMS = CLASSIC_ITEMS;
+            }
         }
 
         function addLog(message, type) {
@@ -134,23 +164,67 @@
             });
             
             let itemsToGive = 0;
-            if (currentRound === 2) itemsToGive = 2;
-            if (currentRound >= 3) itemsToGive = 4;
+            if (state.gameMode === 'endless') {
+                if (currentRound > 1) itemsToGive = 2;
+            } else {
+                if (currentRound === 2) itemsToGive = 2;
+                if (currentRound >= 3) itemsToGive = 4;
+            }
 
-            state.playerInventory = currentRound > 1 ? generateItems(itemsToGive) : [];
-            state.dealerInventory = currentRound > 1 ? generateItems(itemsToGive) : [];
+            const maxItems = 8;
+            if (state.gameMode === 'endless') {
+                if (currentRound === 1) {
+                    state.playerInventory = generateItems(2);
+                    state.dealerInventory = generateItems(2);
+                } else {
+                    state.playerInventory = [...state.playerInventory, ...generateItems(itemsToGive)].slice(0, maxItems);
+                    state.dealerInventory = [...state.dealerInventory, ...generateItems(itemsToGive)].slice(0, maxItems);
+                }
+            } else {
+                state.playerInventory = currentRound > 1 ? generateItems(itemsToGive) : [];
+                state.dealerInventory = currentRound > 1 ? generateItems(itemsToGive) : [];
+            }
             
             addLog(`--- Round ${state.round} ---`, 'game');
             addLog(`${liveCount} live, ${blankCount} blank shells loaded.`, 'game');
             setLastAction(`Round ${state.round} | ${liveCount} Live, ${blankCount} Blank`, 'game');
         }
 
+        function handlePlayerDeath(player) {
+            if (state.gameMode !== 'endless') {
+                state.winner = player === 'player' ? 'dealer' : 'player';
+                return;
+            }
+
+            if (player === 'player') {
+                if (state.playerCharges > 0) {
+                    state.playerCharges--;
+                    state.playerHP = 1;
+                    const msg = `Your defibrillator shocked you back to life! You have ${state.playerCharges} charges left.`;
+                    addLog(msg, 'player');
+                    setLastAction(msg, 'player');
+                } else {
+                    state.winner = 'dealer';
+                }
+            } else { // dealer
+                if (state.dealerCharges > 0) {
+                    state.dealerCharges--;
+                    state.dealerHP = 1;
+                    const msg = `The dealer's defibrillator revived them! They have ${state.dealerCharges} charges left.`;
+                    addLog(msg, 'dealer');
+                    setLastAction(msg, 'dealer');
+                } else {
+                    state.winner = 'player';
+                }
+            }
+        }
+
         function checkWinner() {
             if (state.winner) return;
             if (state.playerHP <= 0) {
-                state.winner = 'dealer';
+                handlePlayerDeath('player');
             } else if (state.dealerHP <= 0) {
-                state.winner = 'player';
+                handlePlayerDeath('dealer');
             }
         }
 
@@ -182,6 +256,100 @@
             state.currentPlayer = nextPlayer;
             render();
             checkForDealerTurn();
+        }
+
+        function applyItemEffect(item, user) {
+            const isPlayer = user === 'player';
+            const opponent = isPlayer ? 'dealer' : 'player';
+            const maxHP = state.gameMode === 'endless' ? INITIAL_HP_ENDLESS : INITIAL_HP;
+            
+            switch (item.type) {
+                case 'magnifyingGlass': {
+                    const shellToReveal = state.shells[state.currentShellIndex];
+                    if (shellToReveal) {
+                        shellToReveal.isRevealed = true;
+                        addLog(`The next shell is a ${shellToReveal.type.toUpperCase()}.`, 'game');
+                        setLastAction(`Next shell is: ${shellToReveal.type.toUpperCase()}`, 'game');
+                    }
+                    break;
+                }
+                case 'handSaw':
+                    state.sawActive = true;
+                    addLog('The next live shell will deal double damage.', 'game');
+                    setLastAction('Saw active: double damage!', 'game');
+                    break;
+                case 'beer': {
+                    const ejectedShell = state.shells[state.currentShellIndex];
+                    if (ejectedShell) {
+                        addLog(`The ejected shell was ${ejectedShell.type.toUpperCase()}.`, 'game');
+                        setLastAction(`Ejected shell was ${ejectedShell.type.toUpperCase()}`, 'game');
+                        state.currentShellIndex++;
+                        if (state.currentShellIndex >= state.shells.length) {
+                            setTimeout(() => {
+                                state.round++;
+                                addLog("Gun is empty. Reloading...", 'game');
+                                setLastAction("Gun is empty. Reloading...", 'game');
+                                startNewRound(state.round);
+                                render();
+                            }, 1500);
+                        }
+                    }
+                    break;
+                }
+                case 'handcuffs':
+                    if (isPlayer) state.dealerHandcuffed++; else state.playerHandcuffed++;
+                    addLog(`The ${opponent} will skip their next turn.`, 'game');
+                    setLastAction(`${opponent} is handcuffed.`, 'game');
+                    break;
+                case 'cigarettes':
+                    if (isPlayer) state.playerHP = Math.min(maxHP, state.playerHP + 1);
+                    else state.dealerHP = Math.min(maxHP, state.dealerHP + 1);
+                    addLog(`${isPlayer ? 'You' : 'The dealer'} restored 1 HP.`, user);
+                    setLastAction('+1 HP', user);
+                    break;
+                case 'inverter': {
+                    const shellToInvert = state.shells[state.currentShellIndex];
+                    if (shellToInvert) {
+                        shellToInvert.type = shellToInvert.type === 'live' ? 'blank' : 'live';
+                        addLog('The chamber was inverted.', 'game');
+                        setLastAction('Shell polarity inverted.', 'game');
+                    }
+                    break;
+                }
+                case 'expiredMedicine':
+                    if (Math.random() < 0.4) {
+                        if(isPlayer) state.playerHP = Math.min(maxHP, state.playerHP + 2);
+                        else state.dealerHP = Math.min(maxHP, state.dealerHP + 2);
+                        addLog('The medicine worked! +2 HP.', user);
+                        setLastAction('Medicine worked! +2 HP.', user);
+                    } else {
+                        if(isPlayer) state.playerHP = Math.max(0, state.playerHP - 1);
+                        else state.dealerHP = Math.max(0, state.dealerHP - 1);
+                        addLog('Bad reaction... -1 HP.', user);
+                        setLastAction('Bad reaction... -1 HP.', user);
+                        checkWinner();
+                    }
+                    break;
+                case 'adrenaline': {
+                    const opponentInventory = isPlayer ? state.dealerInventory : state.playerInventory;
+                    if (opponentInventory.length > 0) {
+                        const stolenItemIndex = Math.floor(Math.random() * opponentInventory.length);
+                        const stolenItem = opponentInventory[stolenItemIndex];
+                        
+                        if (isPlayer) state.dealerInventory.splice(stolenItemIndex, 1);
+                        else state.playerInventory.splice(stolenItemIndex, 1);
+                        
+                        addLog(`${isPlayer ? 'You' : 'The dealer'} stole ${stolenItem.name} and used it instantly!`, user);
+                        setLastAction(`Stole & used ${stolenItem.name}!`, user);
+                        
+                        applyItemEffect(stolenItem, user);
+                    } else {
+                        addLog(`The ${opponent} had no items to steal.`, 'game');
+                        setLastAction('Nothing to steal.', 'game');
+                    }
+                    break;
+                }
+            }
         }
 
         function processShot(shooter, target) {
@@ -217,7 +385,6 @@
                     addLog("Gun is empty. Reloading...", 'game');
                     setLastAction("Gun is empty. Reloading...", 'game');
                     startNewRound(state.round);
-                    state.currentPlayer = 'player';
                     render();
                     checkForDealerTurn();
                 }, 1500);
@@ -239,14 +406,8 @@
                     render();
                     return;
                 }
+                const maxHP = state.gameMode === 'endless' ? INITIAL_HP_ENDLESS : INITIAL_HP;
 
-                const firedShells = state.shells.slice(0, state.currentShellIndex);
-                const firedLive = firedShells.filter(s => s.type === 'live').length;
-                const firedBlank = firedShells.filter(s => s.type === 'blank').length;
-                const remainingLive = state.initialShellCounts.live - firedLive;
-                const remainingBlank = state.initialShellCounts.blank - firedBlank;
-                const remainingTotal = remainingLive + remainingBlank;
-                
                 const useItem = (item) => {
                     state.dealerActionMessage = `Dealer uses ${item.name}.`;
                     render();
@@ -254,18 +415,25 @@
                         addLog(`Dealer uses ${item.name}.`, 'dealer');
                         setLastAction(`Dealer used ${item.name}`, 'dealer');
                         state.dealerInventory = state.dealerInventory.filter(i => i.id !== item.id);
-
-                        switch (item.type) {
-                          case 'cigarettes': state.dealerHP = Math.min(INITIAL_HP, state.dealerHP + 1); break;
-                          case 'magnifyingGlass': state.shells[state.currentShellIndex].isRevealed = true; break;
-                          case 'handSaw': state.sawActive = true; break;
-                          case 'handcuffs': state.playerHandcuffed++; break;
-                        }
-                        
+                        applyItemEffect(item, 'dealer');
                         render();
-                        setTimeout(performDealerAction, 1500); // Re-evaluate after using item
+                        setTimeout(performDealerAction, 1500);
                     }, 1500);
                 };
+
+                const firedShells = state.shells.slice(0, state.currentShellIndex);
+                const firedLive = firedShells.filter(s => s.type === 'live').length;
+                const firedBlank = firedShells.filter(s => s.type === 'blank').length;
+                const remainingLive = state.initialShellCounts.live - firedLive;
+                const remainingBlank = state.initialShellCounts.blank - firedBlank;
+                const remainingTotal = remainingLive + remainingBlank;
+
+                if (state.dealerHP === 1 && state.dealerInventory.some(i => i.type === 'expiredMedicine')) {
+                    useItem(state.dealerInventory.find(i => i.type === 'expiredMedicine')); return;
+                }
+                if (state.playerInventory.length > 1 && state.dealerInventory.some(i => i.type === 'adrenaline')) {
+                    useItem(state.dealerInventory.find(i => i.type === 'adrenaline')); return;
+                }
 
                 if (remainingLive === 0) {
                     state.dealerActionMessage = 'Dealer knows the shell is blank, shooting self.';
@@ -281,14 +449,11 @@
                     setTimeout(() => { state.dealerActionMessage = null; processShot('dealer', 'player'); }, 1500);
                     return;
                 }
-
-                if (state.dealerHP <= 1 && state.dealerInventory.some(i => i.type === 'cigarettes')) {
-                    useItem(state.dealerInventory.find(i => i.type === 'cigarettes'));
-                    return;
+                if (state.dealerHP <= (maxHP / 2) && state.dealerInventory.some(i => i.type === 'cigarettes')) {
+                    useItem(state.dealerInventory.find(i => i.type === 'cigarettes')); return;
                 }
                 if (!currentShell.isRevealed && state.dealerInventory.some(i => i.type === 'magnifyingGlass')) {
-                    useItem(state.dealerInventory.find(i => i.type === 'magnifyingGlass'));
-                    return;
+                    useItem(state.dealerInventory.find(i => i.type === 'magnifyingGlass')); return;
                 }
 
                 if (currentShell.isRevealed) {
@@ -330,27 +495,24 @@
         // 3. UI COMPONENTS (HTML TEMPLATE FUNCTIONS)
         // =================================================================
 
-        const PlayerUI = ({ playerType, hp, inventory, isCurrentTurn, handcuffedTurns }) => {
+        const PlayerUI = ({ playerType, hp, inventory, isCurrentTurn, handcuffedTurns, charges }) => {
           const name = playerType === 'player' ? 'You' : 'The Dealer';
           const nameColor = playerType === 'player' ? 'text-blue-400' : 'text-red-400';
+          const maxHP = state.gameMode === 'endless' ? INITIAL_HP_ENDLESS : INITIAL_HP;
           
           let dynamicClasses = 'border-2 border-gray-700';
           if (isCurrentTurn) {
-              if (playerType === 'player') {
-                  dynamicClasses = 'border-4 border-blue-500 animate-pulse-border';
-              } else {
-                  dynamicClasses = 'border-2 border-red-500';
-              }
+              dynamicClasses = playerType === 'player' ? 'border-4 border-blue-500 animate-pulse-border' : 'border-2 border-red-500';
           }
 
           return `
             <div class="bg-gray-800/50 p-3 md:p-4 rounded-xl transition-all duration-300 ${dynamicClasses}">
               <div class="flex justify-between items-center mb-2">
                 <h2 class="text-xl md:text-2xl font-bold ${nameColor}">${name}</h2>
-                <div class="flex items-center gap-1">
-                  ${Array.from({ length: INITIAL_HP }).map((_, i) =>
-                    i < hp ? HeartIcon('w-5 h-5 md:w-6 md:h-6 text-red-500') : SkullIcon('w-5 h-5 md:w-6 md:h-6 text-gray-600')
-                  ).join('')}
+                <div class="flex items-center gap-1.5">
+                  ${state.gameMode === 'endless' ? Array.from({ length: charges }).map(() => LightningIcon('w-5 h-5 md:w-6 md:h-6 text-yellow-400')).join('') : ''}
+                  ${Array.from({ length: hp }).map(() => HeartIcon('w-5 h-5 md:w-6 md:h-6 text-red-500')).join('')}
+                  ${Array.from({ length: Math.max(0, maxHP - hp) }).map(() => SkullIcon('w-5 h-5 md:w-6 md:h-6 text-gray-600')).join('')}
                 </div>
               </div>
               ${handcuffedTurns > 0 ? `
@@ -359,13 +521,14 @@
                 </div>` : ''}
               <div>
                 <h3 class="text-base font-semibold mb-1 text-gray-300">Inventory</h3>
-                <div class="grid grid-cols-2 gap-2 min-h-[50px]">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2 min-h-[50px]">
                   ${inventory.map(item => `
                     <button
                       data-action="show-item-info"
                       data-item-id="${item.id}"
                       ${playerType === 'dealer' || !isCurrentTurn ? 'disabled' : ''}
-                      class="px-2 py-1 rounded-md text-xs md:text-sm transition-all duration-200 bg-gray-700 border-gray-600 border-2 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-gray-600 hover:enabled:border-gray-400 text-white font-semibold"
+                      class="px-2 py-1 rounded-md text-xs md:text-sm transition-all duration-200 bg-gray-700 border-gray-600 border-2 disabled:opacity-50 disabled:cursor-not-allowed hover:enabled:bg-gray-600 hover:enabled:border-gray-400 text-white font-semibold truncate"
+                      title="${item.name}"
                     >
                       ${item.name}
                     </button>
@@ -409,7 +572,7 @@
             if (!item) return '';
             return `
                 <div class="fixed inset-0 bg-black/80 flex justify-center items-center z-50" data-action="cancel-item">
-                    <div class="bg-gray-800 p-8 rounded-xl border-4 border-yellow-500 text-center max-w-sm">
+                    <div class="bg-gray-800 p-8 rounded-xl border-4 border-yellow-500 text-center max-w-sm animate-fade-in">
                         <h2 class="text-3xl font-bold text-yellow-300 mb-2">${item.name}</h2>
                         <p class="text-lg text-gray-300 mb-6">${item.description}</p>
                         <div class="flex justify-center gap-4">
@@ -433,7 +596,7 @@
             const { 
                 round, playerHP, dealerHP, shells, currentShellIndex, playerInventory, dealerInventory, 
                 currentPlayer, playerHandcuffed, dealerHandcuffed, logs, winner, initialShellCounts, 
-                dealerActionMessage, itemToConfirm, gameMode, lastActionMessage
+                dealerActionMessage, itemToConfirm, gameMode, lastActionMessage, playerCharges, dealerCharges
             } = state;
             
             root.innerHTML = `
@@ -445,15 +608,13 @@
                     <header class="flex justify-between items-center shrink-0">
                         <div class="flex-1 flex justify-start">
                             <button data-action="toggle-mode" class="p-2 text-gray-400 hover:text-white transition-colors text-sm font-semibold rounded-lg bg-gray-800 border-2 border-gray-600 whitespace-nowrap">
-                                Mode: <span class="${gameMode === 'testing' ? 'text-yellow-400' : 'text-green-400'}">
-                                    ${gameMode === 'testing' ? 'Testing' : 'Live'}
+                                Mode: <span class="capitalize ${gameMode === 'testing' ? 'text-yellow-400' : gameMode === 'endless' ? 'text-purple-400' : 'text-green-400'}">
+                                    ${gameMode}
                                 </span>
                             </button>
                         </div>
                         <h1 class="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-red-600 tracking-wider text-center px-2 sm:px-4 whitespace-nowrap">Buckshot Roulette</h1>
-                        <div class="flex-1 flex justify-end">
-                            <!-- Sound button removed -->
-                        </div>
+                        <div class="flex-1 flex justify-end"></div>
                     </header>
                     
                     ${gameMode !== 'live' ? `
@@ -477,8 +638,8 @@
                     </div>
 
                     <div class="grid grid-cols-1 gap-2 md:gap-4 shrink-0">
-                      ${PlayerUI({ playerType: "dealer", hp: dealerHP, inventory: dealerInventory, isCurrentTurn: currentPlayer === 'dealer', handcuffedTurns: dealerHandcuffed })}
-                      ${PlayerUI({ playerType: "player", hp: playerHP, inventory: playerInventory, isCurrentTurn: currentPlayer === 'player', handcuffedTurns: playerHandcuffed })}
+                      ${PlayerUI({ playerType: "dealer", hp: dealerHP, inventory: dealerInventory, isCurrentTurn: currentPlayer === 'dealer', handcuffedTurns: dealerHandcuffed, charges: dealerCharges })}
+                      ${PlayerUI({ playerType: "player", hp: playerHP, inventory: playerInventory, isCurrentTurn: currentPlayer === 'player', handcuffedTurns: playerHandcuffed, charges: playerCharges })}
                     </div>
 
                     <div class="bg-gray-800/50 p-3 rounded-xl border-2 border-gray-700 shrink-0">
@@ -521,28 +682,26 @@
         }
 
         document.getElementById('root').addEventListener('click', (e) => {
-            let target = e.target;
-            let actionTarget = target.closest('[data-action]');
-            
+            let actionTarget = e.target.closest('[data-action]');
             if (!actionTarget) return;
 
             const action = actionTarget.dataset.action;
             const itemId = actionTarget.dataset.itemId;
             
-            // Prevent modal from closing when clicking inside it
-            if (action === 'cancel-item' && actionTarget === e.target && e.target.classList.contains('bg-black/80')) {
-                 state.itemToConfirm = null;
-                 render();
-                 return;
+            if (action.includes('item') && actionTarget.closest('.fixed')) {
+                // Inside modal
+                if(action === 'cancel-item') {
+                    state.itemToConfirm = null;
+                    render();
+                }
             } else if (action === 'cancel-item') {
-                 state.itemToConfirm = null;
-                 render();
-                 return;
-            }
-
-            if (state.currentPlayer !== 'player' && !['toggle-mode', 'restart'].includes(action)) {
+                // Clicking on background
+                state.itemToConfirm = null;
+                render();
                 return;
             }
+
+            if (state.currentPlayer !== 'player' && !['toggle-mode', 'restart'].includes(action)) return;
 
             switch (action) {
                 case 'restart':
@@ -556,70 +715,39 @@
                 case 'shoot-self':
                     processShot('player', 'player');
                     break;
-                case 'show-item-info':
+                case 'show-item-info': {
                     const itemToShow = state.playerInventory.find(i => i.id == itemId);
                     if (itemToShow) {
                         state.itemToConfirm = itemToShow;
                         render();
                     }
                     break;
-                case 'confirm-item':
+                }
+                case 'confirm-item': {
                     const itemToUse = state.playerInventory.find(i => i.id == itemId);
                     if (itemToUse) {
                         addLog(`You use ${itemToUse.name}.`, 'player');
                         setLastAction(`You used ${itemToUse.name}`, 'player');
                         state.itemToConfirm = null;
-
-                        switch (itemToUse.type) {
-                            case 'magnifyingGlass':
-                                const shellToReveal = state.shells[state.currentShellIndex];
-                                if (shellToReveal) {
-                                    shellToReveal.isRevealed = true;
-                                    addLog(`The next shell is a ${shellToReveal.type.toUpperCase()}.`, 'game');
-                                    setLastAction(`Next shell is: ${shellToReveal.type.toUpperCase()}`, 'game');
-                                }
-                                break;
-                            case 'handSaw':
-                                state.sawActive = true;
-                                addLog('The next live shell will deal double damage.', 'game');
-                                break;
-                            case 'beer':
-                                const ejectedShell = state.shells[state.currentShellIndex];
-                                if (ejectedShell) {
-                                    addLog(`The ejected shell was ${ejectedShell.type.toUpperCase()}.`, 'game');
-                                    setLastAction(`Ejected shell was ${ejectedShell.type.toUpperCase()}`, 'game');
-                                    state.currentShellIndex++;
-                                    if (state.currentShellIndex >= state.shells.length) {
-                                        setTimeout(() => {
-                                            state.round++;
-                                            addLog("Gun is empty. Reloading...", 'game');
-                                            setLastAction("Gun is empty. Reloading...", 'game');
-                                            startNewRound(state.round);
-                                            state.currentPlayer = 'player';
-                                            render();
-                                        }, 1500);
-                                    }
-                                }
-                                break;
-                            case 'handcuffs':
-                                state.dealerHandcuffed++;
-                                addLog('The dealer will skip their next turn.', 'game');
-                                break;
-                            case 'cigarettes':
-                                state.playerHP = Math.min(INITIAL_HP, state.playerHP + 1);
-                                addLog('You restored 1 HP.', 'player');
-                                break;
-                        }
-
+                        
                         state.playerInventory = state.playerInventory.filter(i => i.id !== itemToUse.id);
+                        applyItemEffect(itemToUse, 'player');
+
                         render();
                         checkForDealerTurn();
                     }
                     break;
-                case 'toggle-mode':
-                    state.gameMode = state.gameMode === 'testing' ? 'live' : 'testing';
+                }
+                case 'toggle-mode': {
+                    const modes = ['live', 'testing', 'endless'];
+                    const currentModeIndex = modes.indexOf(state.gameMode);
+                    const nextModeIndex = (currentModeIndex + 1) % modes.length;
+                    state.gameMode = modes[nextModeIndex];
+                    resetState();
+                    startNewRound(1);
                     render();
                     break;
+                }
             }
         });
 
