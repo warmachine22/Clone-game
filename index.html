@@ -13,6 +13,13 @@
         .animate-fade-in {
             animation: fade-in 0.3s ease-out forwards;
         }
+        @keyframes pulse-border {
+            0%, 100% { border-opacity: 1; }
+            50% { border-opacity: 0.4; }
+        }
+        .animate-pulse-border {
+            animation: pulse-border 1.5s ease-in-out infinite;
+        }
         body {
             font-family: monospace;
             -webkit-font-smoothing: antialiased;
@@ -326,10 +333,18 @@
         const PlayerUI = ({ playerType, hp, inventory, isCurrentTurn, handcuffedTurns }) => {
           const name = playerType === 'player' ? 'You' : 'The Dealer';
           const nameColor = playerType === 'player' ? 'text-blue-400' : 'text-red-400';
-          const borderColor = isCurrentTurn ? (playerType === 'player' ? 'border-blue-500' : 'border-red-500') : 'border-gray-700';
+          
+          let dynamicClasses = 'border-2 border-gray-700';
+          if (isCurrentTurn) {
+              if (playerType === 'player') {
+                  dynamicClasses = 'border-4 border-blue-500 animate-pulse-border';
+              } else {
+                  dynamicClasses = 'border-2 border-red-500';
+              }
+          }
 
           return `
-            <div class="bg-gray-800/50 p-3 md:p-4 rounded-xl border-2 transition-all duration-300 ${borderColor}">
+            <div class="bg-gray-800/50 p-3 md:p-4 rounded-xl transition-all duration-300 ${dynamicClasses}">
               <div class="flex justify-between items-center mb-2">
                 <h2 class="text-xl md:text-2xl font-bold ${nameColor}">${name}</h2>
                 <div class="flex items-center gap-1">
@@ -461,9 +476,9 @@
                         }).join('')}
                     </div>
 
-                    <div class="grid grid-cols-1 lg:grid-cols-2 gap-2 md:gap-4 shrink-0">
-                      ${PlayerUI({ playerType: "player", hp: playerHP, inventory: playerInventory, isCurrentTurn: currentPlayer === 'player', handcuffedTurns: playerHandcuffed })}
+                    <div class="grid grid-cols-1 gap-2 md:gap-4 shrink-0">
                       ${PlayerUI({ playerType: "dealer", hp: dealerHP, inventory: dealerInventory, isCurrentTurn: currentPlayer === 'dealer', handcuffedTurns: dealerHandcuffed })}
+                      ${PlayerUI({ playerType: "player", hp: playerHP, inventory: playerInventory, isCurrentTurn: currentPlayer === 'player', handcuffedTurns: playerHandcuffed })}
                     </div>
 
                     <div class="bg-gray-800/50 p-3 rounded-xl border-2 border-gray-700 shrink-0">
@@ -491,8 +506,7 @@
                             ${GameLog({ logs })}
                         </div>`
                         :
-                        `<div class="flex-grow"></div>
-                         <div class="shrink-0 w-full">
+                        `<div class="shrink-0 w-full mt-auto">
                             <div class="w-full flex flex-col items-center justify-center p-2 text-center bg-gray-900/70 rounded-xl border-2 border-gray-700 animate-fade-in">
                                 <h4 class="text-xs font-bold text-gray-500 uppercase tracking-widest mb-1">Last Action</h4>
                                 <p class="text-base sm:text-lg font-semibold ${lastActionMessage.type === 'player' ? 'text-blue-300' : lastActionMessage.type === 'dealer' ? 'text-red-300' : 'text-gray-300'}">
