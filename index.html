@@ -71,6 +71,11 @@
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor" class="${className}">
                 <path d="M7 2v11h3v9l7-12h-4l4-8z"/>
             </svg>`;
+        
+        const QuestionMarkIcon = (className = '') => `
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" class="${className}">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 5.25h.008v.008H12v-.008Z" />
+            </svg>`;
 
         const ShellIcon = ({ type, isFired = false }) => {
             const colors = { live: 'bg-red-600 border-red-400', blank: 'bg-blue-600 border-blue-400', unknown: 'bg-gray-600 border-gray-400 text-gray-300' };
@@ -110,7 +115,10 @@
                 dealerActionMessage: null,
                 itemToConfirm: null,
                 gameMode: newMode,
+                showHelpModal: false,
                 lastActionMessage: { message: 'Game starting...', type: 'game' },
+                playerRevealedShellIndex: null,
+                dealerRevealedShellIndex: null,
             };
 
             if (state.gameMode === 'endless') {
@@ -125,7 +133,7 @@
         }
 
         function addLog(message, type) {
-            if (state.gameMode === 'live') return;
+            if (state.gameMode === 'live' || state.gameMode === 'endless') return;
             state.logs.unshift({ id: Date.now() + Math.random(), message, type });
         }
 
@@ -151,12 +159,14 @@
               ...Array(blankCount).fill('blank')
             ]
             .sort(() => Math.random() - 0.5)
-            .map((type, i) => ({ id: i, type, isRevealed: false }));
+            .map((type, i) => ({ id: i, type }));
           
             state.currentShellIndex = 0;
             state.sawActive = false;
             state.dealerActionMessage = null;
             state.initialShellCounts = { live: liveCount, blank: blankCount };
+            state.playerRevealedShellIndex = null;
+            state.dealerRevealedShellIndex = null;
           
             const generateItems = (count) => Array.from({ length: count }, (_, i) => {
                 const itemProto = ALL_ITEMS[Math.floor(Math.random() * ALL_ITEMS.length)];
@@ -267,9 +277,15 @@
                 case 'magnifyingGlass': {
                     const shellToReveal = state.shells[state.currentShellIndex];
                     if (shellToReveal) {
-                        shellToReveal.isRevealed = true;
-                        addLog(`The next shell is a ${shellToReveal.type.toUpperCase()}.`, 'game');
-                        setLastAction(`Next shell is: ${shellToReveal.type.toUpperCase()}`, 'game');
+                        if (isPlayer) {
+                            state.playerRevealedShellIndex = state.currentShellIndex;
+                            addLog(`You see the next shell is a ${shellToReveal.type.toUpperCase()}.`, 'player');
+                            setLastAction(`You checked the shell.`, 'player');
+                        } else {
+                            state.dealerRevealedShellIndex = state.currentShellIndex;
+                            addLog(`The dealer checks the current shell.`, 'dealer');
+                            setLastAction(`Dealer checked the shell.`, 'dealer');
+                        }
                     }
                     break;
                 }
@@ -407,6 +423,7 @@
                     return;
                 }
                 const maxHP = state.gameMode === 'endless' ? INITIAL_HP_ENDLESS : INITIAL_HP;
+                const isDealerRevealed = state.dealerRevealedShellIndex === state.currentShellIndex;
 
                 const useItem = (item) => {
                     state.dealerActionMessage = `Dealer uses ${item.name}.`;
@@ -452,11 +469,11 @@
                 if (state.dealerHP <= (maxHP / 2) && state.dealerInventory.some(i => i.type === 'cigarettes')) {
                     useItem(state.dealerInventory.find(i => i.type === 'cigarettes')); return;
                 }
-                if (!currentShell.isRevealed && state.dealerInventory.some(i => i.type === 'magnifyingGlass')) {
+                if (!isDealerRevealed && state.dealerInventory.some(i => i.type === 'magnifyingGlass')) {
                     useItem(state.dealerInventory.find(i => i.type === 'magnifyingGlass')); return;
                 }
 
-                if (currentShell.isRevealed) {
+                if (isDealerRevealed) {
                     if (currentShell.type === 'live') {
                         const saw = state.dealerInventory.find(i => i.type === 'handSaw');
                         if (saw) { useItem(saw); return; }
@@ -587,6 +604,60 @@
                 </div>`;
         };
 
+        const HelpModal = ({ isVisible }) => {
+            if (!isVisible) return '';
+
+            const renderItem = (item) => `
+                <li class="mb-2">
+                    <strong class="text-yellow-300">${item.name}:</strong>
+                    <span class="text-gray-300">${item.description}</span>
+                </li>`;
+
+            return `
+                <div class="fixed inset-0 bg-black/80 flex justify-center items-center z-50 p-4" data-action="toggle-help">
+                    <div class="bg-gray-800 w-full max-w-2xl h-full max-h-[90vh] p-6 rounded-xl border-4 border-indigo-500 text-left animate-fade-in flex flex-col" onclick="event.stopPropagation()">
+                        <div class="flex justify-between items-center mb-4 shrink-0">
+                            <h2 class="text-3xl font-bold text-indigo-300">How to Play</h2>
+                            <button data-action="toggle-help" class="text-gray-400 hover:text-white transition-colors">
+                                <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                        <div class="overflow-y-auto pr-2 text-gray-200">
+                            <h3 class="text-2xl font-semibold text-green-400 mb-2 border-b-2 border-green-400/30 pb-1">Core Gameplay</h3>
+                            <p class="mb-4">
+                                The goal is to survive longer than the dealer. Each round, a shotgun is loaded with a mix of <strong class="text-red-500">Live</strong> and <strong class="text-blue-400">Blank</strong> shells. On your turn, you can use an item or shoot yourself or the dealer.
+                            </p>
+                            <ul class="list-disc list-inside mb-4 pl-2 space-y-1">
+                                <li>Shooting the dealer with a <strong class="text-red-500">Live</strong> shell damages them.</li>
+                                <li>Shooting yourself with a <strong class="text-red-500">Live</strong> shell damages you.</li>
+                                <li>Shooting anyone with a <strong class="text-blue-400">Blank</strong> shell does nothing, but if you shoot yourself, you get to <strong class="text-yellow-300">go again</strong>.</li>
+                                <li>The round ends when the shotgun is empty. A new round begins with more shells and items.</li>
+                            </ul>
+
+                            <h3 class="text-2xl font-semibold text-green-400 mb-2 mt-6 border-b-2 border-green-400/30 pb-1">Game Modes</h3>
+                            <ul class="list-disc list-inside mb-4 pl-2 space-y-1">
+                                <li><strong class="text-green-400">Live:</strong> A streamlined mode. Only the last action is shown. No detailed log or fired shell history.</li>
+                                <li><strong class="text-yellow-400">Testing:</strong> The training ground. You can see a full game log and the type of each shell after it's been fired.</li>
+                                <li><strong class="text-purple-400">Endless:</strong> The ultimate challenge. You start with more HP and <strong class="text-yellow-400">Defibrillator Charges</strong>. New, powerful items are available. The game continues indefinitely until one person runs out of charges.</li>
+                            </ul>
+
+                            <h3 class="text-2xl font-semibold text-green-400 mb-2 mt-6 border-b-2 border-green-400/30 pb-1">Classic Items</h3>
+                            <ul class="mb-4 pl-2">
+                                ${CLASSIC_ITEMS.map(renderItem).join('')}
+                            </ul>
+
+                            <h3 class="text-2xl font-semibold text-green-400 mb-2 mt-6 border-b-2 border-green-400/30 pb-1">Endless Mode Items</h3>
+                            <p class="mb-2 text-sm text-gray-400">(Includes all Classic Items plus the following)</p>
+                            <ul class="mb-4 pl-2">
+                                ${ENDLESS_ITEMS.filter(item => !CLASSIC_ITEMS.find(ci => ci.type === item.type)).map(renderItem).join('')}
+                            </ul>
+                        </div>
+                    </div>
+                </div>`;
+        };
+
         // =================================================================
         // 4. MAIN RENDER FUNCTION & EVENT HANDLING
         // =================================================================
@@ -596,13 +667,15 @@
             const { 
                 round, playerHP, dealerHP, shells, currentShellIndex, playerInventory, dealerInventory, 
                 currentPlayer, playerHandcuffed, dealerHandcuffed, logs, winner, initialShellCounts, 
-                dealerActionMessage, itemToConfirm, gameMode, lastActionMessage, playerCharges, dealerCharges
+                dealerActionMessage, itemToConfirm, gameMode, lastActionMessage, playerCharges, dealerCharges, showHelpModal,
+                playerRevealedShellIndex
             } = state;
             
             root.innerHTML = `
                 <div class="bg-gradient-to-br from-gray-900 via-black to-gray-800 text-white h-screen flex flex-col items-center p-2 sm:p-4 antialiased">
                   ${GameOverModal({ winner })}
                   ${ItemConfirmationModal({ item: itemToConfirm })}
+                  ${HelpModal({ isVisible: showHelpModal })}
                   
                   <div class="w-full max-w-5xl mx-auto flex flex-col h-full space-y-2">
                     <header class="flex justify-between items-center shrink-0">
@@ -614,10 +687,14 @@
                             </button>
                         </div>
                         <h1 class="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-bold text-red-600 tracking-wider text-center px-2 sm:px-4 whitespace-nowrap">Buckshot Roulette</h1>
-                        <div class="flex-1 flex justify-end"></div>
+                        <div class="flex-1 flex justify-end">
+                            <button data-action="toggle-help" class="p-2 text-gray-400 hover:text-white transition-colors rounded-full bg-gray-800 border-2 border-gray-600">
+                                ${QuestionMarkIcon('w-6 h-6')}
+                            </button>
+                        </div>
                     </header>
                     
-                    ${gameMode !== 'live' ? `
+                    ${gameMode !== 'live' && gameMode !== 'endless' ? `
                     <div class="text-center shrink-0">
                         <p class="text-lg font-bold text-gray-300">
                             Round ${round}: <span class="font-semibold text-red-500">${initialShellCounts.live} Live</span>, <span class="font-semibold text-blue-400">${initialShellCounts.blank} Blank</span>
@@ -628,9 +705,9 @@
                     <div class="flex justify-center items-center flex-wrap gap-2 md:gap-3 my-1 min-h-[4rem] shrink-0">
                         ${shells.map((shell, index) => {
                             const isFired = index < currentShellIndex;
-                            if (gameMode === 'live' && isFired) return '';
+                            if ((gameMode === 'live' || gameMode === 'endless') && isFired) return '';
                             let displayType = 'unknown';
-                            if (shell.isRevealed || (gameMode === 'testing' && isFired)) {
+                            if (playerRevealedShellIndex === index || (gameMode === 'testing' && isFired)) {
                                 displayType = shell.type;
                             }
                             return ShellIcon({ type: displayType, isFired: gameMode === 'testing' && isFired });
@@ -687,21 +764,20 @@
 
             const action = actionTarget.dataset.action;
             const itemId = actionTarget.dataset.itemId;
-            
-            if (action.includes('item') && actionTarget.closest('.fixed')) {
-                // Inside modal
-                if(action === 'cancel-item') {
-                    state.itemToConfirm = null;
-                    render();
-                }
-            } else if (action === 'cancel-item') {
-                // Clicking on background
+
+            // Handle modal background clicks first
+            if (action === 'cancel-item' && actionTarget.classList.contains('fixed')) {
                 state.itemToConfirm = null;
                 render();
                 return;
             }
-
-            if (state.currentPlayer !== 'player' && !['toggle-mode', 'restart'].includes(action)) return;
+            if (action === 'toggle-help' && actionTarget.classList.contains('fixed')) {
+                state.showHelpModal = false;
+                render();
+                return;
+            }
+            
+            if (state.currentPlayer !== 'player' && !['toggle-mode', 'restart', 'toggle-help'].includes(action)) return;
 
             switch (action) {
                 case 'restart':
@@ -729,15 +805,17 @@
                         addLog(`You use ${itemToUse.name}.`, 'player');
                         setLastAction(`You used ${itemToUse.name}`, 'player');
                         state.itemToConfirm = null;
-                        
                         state.playerInventory = state.playerInventory.filter(i => i.id !== itemToUse.id);
                         applyItemEffect(itemToUse, 'player');
-
                         render();
                         checkForDealerTurn();
                     }
                     break;
                 }
+                case 'cancel-item': // Button inside modal
+                    state.itemToConfirm = null;
+                    render();
+                    break;
                 case 'toggle-mode': {
                     const modes = ['live', 'testing', 'endless'];
                     const currentModeIndex = modes.indexOf(state.gameMode);
@@ -748,6 +826,10 @@
                     render();
                     break;
                 }
+                case 'toggle-help': // Header icon and close button
+                    state.showHelpModal = !state.showHelpModal;
+                    render();
+                    break;
             }
         });
 
